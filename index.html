@@ -1,0 +1,183 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<title>Pre-transplant time</title>
+<style>
+  :root { --ink:#14213D; --accent:#0B7A75; --paper:#F5F7F9; --line:#E2E8F0; --muted:#4A5568; }
+  * { box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
+  body { margin:0; background:var(--paper); color:var(--ink); font-family:'Avenir Next','Segoe UI','Helvetica Neue',Arial,sans-serif; }
+  .wrap { max-width:600px; margin:0 auto; padding:16px; }
+  h1 { font-size:24px; font-weight:600; margin:0 0 4px; line-height:1.2; }
+  .sub { font-size:14px; color:var(--muted); margin:0 0 14px; }
+  .names { display:flex; flex-wrap:wrap; gap:8px; margin-bottom:14px; }
+  .name { padding:8px 12px; border-radius:6px; border:1px solid #CBD5E0; background:white; color:var(--ink); font-size:14px; }
+  .name.on { background:var(--accent); border-color:var(--accent); color:white; }
+  .row { background:white; border:1px solid var(--line); border-radius:8px; padding:8px 12px; margin-bottom:8px; transition:background 150ms; }
+  .row.hit { background:var(--accent); color:white; }
+  .row .top { display:flex; justify-content:space-between; align-items:baseline; margin-bottom:6px; }
+  .row .act { font-size:14px; line-height:1.3; padding-right:8px; }
+  .row .tot { font-size:12px; color:var(--muted); white-space:nowrap; font-variant-numeric:tabular-nums; }
+  .row.hit .tot { color:white; }
+  .chips { display:flex; gap:4px; }
+  .chips button { flex:1; min-height:42px; border-radius:6px; border:1px solid var(--line); background:var(--paper); color:var(--ink); font-size:14px; font-variant-numeric:tabular-nums; }
+  .row.hit .chips button { background:rgba(255,255,255,.2); color:white; border-color:transparent; }
+  .other input { width:100%; font-size:14px; padding:8px; border:1px solid var(--line); border-radius:6px; margin-bottom:6px; color:var(--ink); }
+  .total { display:flex; justify-content:space-between; align-items:baseline; margin:12px 0 8px; }
+  .total b { font-size:30px; font-weight:600; font-variant-numeric:tabular-nums; }
+  .total span, .status { font-size:14px; color:var(--muted); }
+  .entry { display:flex; justify-content:space-between; align-items:center; padding:8px 0; border-top:1px solid var(--line); font-size:14px; }
+  .entry small { font-size:12px; color:var(--muted); text-decoration:underline; background:none; border:0; margin-left:12px; }
+  footer { display:flex; justify-content:space-between; align-items:center; border-top:1px solid #CBD5E0; padding-top:12px; margin-top:8px; font-size:14px; color:var(--muted); }
+  .export { background:var(--ink); color:white; border:0; border-radius:6px; padding:9px 12px; font-size:14px; }
+  .empty { font-size:14px; color:var(--muted); }
+  button { font-family:inherit; cursor:pointer; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Pre-transplant time</h1>
+  <p class="sub">Unbillable work only. When you finish a task, tap the minutes next to it once. Never enter a patient name, MRN or other identifier.</p>
+
+  <div class="names" id="names"></div>
+  <div class="row" style="display:flex;justify-content:space-between;align-items:center">
+    <span class="act">Off today (vacation, inpatient service, conference)</span>
+    <button onclick="logOff()" style="min-height:40px;padding:0 14px;border-radius:6px;border:1px solid var(--line);background:var(--paper);color:var(--ink);font-size:14px">Mark off</button>
+  </div>
+  <div id="rows"></div>
+
+  <div class="total"><div><b id="todayTotal">0h 0m</b> <span id="who">today, no name selected</span></div><div class="status" id="status"></div></div>
+  <div id="list"></div>
+
+  <p class="empty" id="coverage" style="margin:8px 0 0"></p>
+  <footer><span id="count"></span><button class="export" onclick="exportCsv()">Export</button></footer>
+
+  <div id="exportPanel" style="display:none;margin-top:12px;background:white;border:1px solid var(--line);border-radius:8px;padding:12px">
+    <p class="sub" style="margin:0 0 8px">Your log, ready to send. Nothing has been deleted. Use Share to send it by email or message, Copy to paste it, or Save to keep the file on this device.</p>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:8px">
+      <button class="export" onclick="shareCsv()">Share</button>
+      <button class="export" style="background:var(--accent)" onclick="copyCsv()">Copy</button>
+      <a id="csvLink" class="export" style="text-decoration:none;display:inline-block" download>Save</a>
+      <button class="name" onclick="closeExport()">Close</button>
+    </div>
+    <textarea id="csvBox" readonly style="width:100%;height:140px;font-size:12px;font-family:monospace;border:1px solid var(--line);border-radius:6px;padding:8px"></textarea>
+  </div>
+</div>
+
+<script>
+const ACTIVITIES = [
+  "Review of tests",
+  "Review of treatment plan",
+  "Referring physician communication",
+  "Donor selection",
+  "Case consultation with peer",
+  "Patient communication",
+  "Insurance authorization",
+  "SOP review for application to case",
+  "Literature review for treatment plan",
+  "Emails from case manager / unrelated donor coordinator",
+  "Daily sit-down rounds, clinic transplant patients",
+  "Disease-specific BMT rounds (leukemia / myeloma / lymphoma)",
+  "Weekly transplant meeting",
+  "Tumor board",
+];
+const DOCTORS = ["Romancik", "Cho", "Reddy", "Donato"];
+const DURATIONS = [5, 10, 15, 30, 45, 60];
+const KEY = "bmt-pretx-log";
+const DOC_KEY = "bmt-pretx-doctor";
+
+let entries = load();
+let doctor = localStorage.getItem(DOC_KEY) || "";
+
+function load() { try { return JSON.parse(localStorage.getItem(KEY) || "[]"); } catch (e) { return []; } }
+function save() { localStorage.setItem(KEY, JSON.stringify(entries)); }
+function today() { const d = new Date(); return d.getFullYear() + "-" + String(d.getMonth()+1).padStart(2,"0") + "-" + String(d.getDate()).padStart(2,"0"); }
+function now() { const d = new Date(); return String(d.getHours()).padStart(2,"0") + ":" + String(d.getMinutes()).padStart(2,"0"); }
+function setStatus(t) { const s = document.getElementById("status"); s.textContent = t; if (t) setTimeout(() => { if (s.textContent === t) s.textContent = ""; }, 1500); }
+
+function pick(d) { doctor = d; localStorage.setItem(DOC_KEY, d); render(); }
+
+function log(activity, minutes) {
+  if (!doctor) { setStatus("Choose your name first."); return; }
+  entries.unshift({ id: Date.now(), date: today(), time: now(), doctor, activity, minutes });
+  save(); render(); setStatus("Saved");
+  const el = document.querySelector('[data-act="' + cssEsc(activity) + '"]');
+  if (el) { el.classList.add("hit"); setTimeout(() => el.classList.remove("hit"), 600); }
+}
+function logOff() {
+  if (!doctor) { setStatus("Choose your name first."); return; }
+  if (entries.some(e => e.doctor === doctor && e.date === today() && e.activity === "OFF")) { setStatus("Already marked off today."); return; }
+  entries.unshift({ id: Date.now(), date: today(), time: now(), doctor, activity: "OFF", minutes: 0 });
+  save(); render(); setStatus("Marked off for today.");
+}
+function logOther(minutes) {
+  const inp = document.getElementById("otherText"); const t = (inp.value || "").trim();
+  if (!t) { setStatus("Type what the work was, then tap the minutes."); return; }
+  log(t, minutes); inp.value = "";
+}
+function remove(id) { entries = entries.filter(e => e.id !== id); save(); render(); }
+function cssEsc(s) { return s.replace(/"/g, '\\"'); }
+
+function csvText() {
+  const head = ["date","time","physician","activity","minutes"];
+  const rows = entries.slice().reverse().map(e => [e.date, e.time, e.doctor, e.activity, e.minutes].map(v => '"' + String(v ?? "").replace(/"/g,'""') + '"').join(","));
+  return [head.join(","), ...rows].join("\n");
+}
+function exportCsv() {
+  const text = csvText();
+  const panel = document.getElementById("exportPanel");
+  document.getElementById("csvBox").value = text;
+  const name = "bmt_pretransplant_time_" + (doctor || "all") + "_" + today() + ".csv";
+  const link = document.getElementById("csvLink");
+  link.href = "data:text/csv;charset=utf-8," + encodeURIComponent(text); link.download = name; link.textContent = "Save " + name;
+  panel.style.display = "block"; panel.scrollIntoView({ behavior: "smooth" });
+}
+async function shareCsv() {
+  const text = csvText(); const name = "bmt_pretransplant_time_" + (doctor || "all") + "_" + today() + ".csv";
+  try {
+    const file = new File([text], name, { type: "text/csv" });
+    if (navigator.canShare && navigator.canShare({ files: [file] })) { await navigator.share({ files: [file], title: name }); return; }
+  } catch (e) {}
+  setStatus("Sharing not available here; use Copy or Save.");
+}
+async function copyCsv() {
+  try { await navigator.clipboard.writeText(csvText()); setStatus("Copied. Paste into an email."); }
+  catch (e) { const b = document.getElementById("csvBox"); b.focus(); b.select(); setStatus("Select all in the box and copy."); }
+}
+function closeExport() { document.getElementById("exportPanel").style.display = "none"; }
+
+function render() {
+  document.getElementById("names").innerHTML = DOCTORS.map(d =>
+    '<button class="name' + (d === doctor ? " on" : "") + '" onclick="pick(\'' + d + '\')">' + d + '</button>').join("");
+  const todays = entries.filter(e => e.doctor === doctor && e.date === today());
+  const mins = a => todays.filter(e => e.activity === a).reduce((s, e) => s + e.minutes, 0);
+  const chips = fn => '<div class="chips">' + DURATIONS.map(d => '<button onclick="' + fn(d) + '">' + d + '</button>').join("") + '</div>';
+  let html = ACTIVITIES.map((a, i) => {
+    const m = mins(a);
+    return '<div class="row" data-act="' + a.replace(/"/g,"&quot;") + '"><div class="top"><span class="act">' + a + '</span><span class="tot">' + (m ? m + " min today" : "") + '</span></div>' +
+      chips(d => 'log(ACTIVITIES[' + i + '],' + d + ')') + '</div>';
+  }).join("");
+  html += '<div class="row other"><input id="otherText" placeholder="Other: type what it was, then tap the minutes">' + chips(d => 'logOther(' + d + ')') + '</div>';
+  const otherVal = document.getElementById("otherText") ? document.getElementById("otherText").value : "";
+  document.getElementById("rows").innerHTML = html;
+  if (otherVal) document.getElementById("otherText").value = otherVal;
+
+  const tot = todays.reduce((s, e) => s + e.minutes, 0);
+  document.getElementById("todayTotal").textContent = Math.floor(tot/60) + "h " + (tot%60) + "m";
+  document.getElementById("who").textContent = "today, " + (doctor || "no name selected");
+  document.getElementById("list").innerHTML = todays.length ? todays.map(e =>
+    '<div class="entry"><div>' + e.time + '&nbsp; ' + (e.activity === "OFF" ? "Off today" : e.activity + ' <b>' + e.minutes + ' min</b>') + '</div><button class="small" onclick="remove(' + e.id + ')"><small>delete</small></button></div>').join("")
+    : '<p class="empty">No entries yet today.</p>';
+  const days = new Set(entries.filter(e => e.doctor === doctor).map(e => e.date));
+  let covered = 0; for (let i = 0; i < 14; i++) { const d = new Date(); d.setDate(d.getDate() - i);
+    const k = d.getFullYear() + "-" + String(d.getMonth()+1).padStart(2,"0") + "-" + String(d.getDate()).padStart(2,"0"); if (days.has(k)) covered++; }
+  document.getElementById("coverage").textContent = doctor ? covered + " of the last 14 days have an entry or an off marker." : "";
+  const all = entries.reduce((s, e) => s + e.minutes, 0);
+  document.getElementById("count").textContent = entries.length + " entries, " + Math.round(all/60) + " h logged on this device";
+}
+render();
+</script>
+</body>
+</html>
