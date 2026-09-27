@@ -4,6 +4,13 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
 <meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="PreTx Time">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="theme-color" content="#0B7A75">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="icon-180.png">
+<link rel="icon" type="image/png" href="icon-192.png">
 <title>Pre-transplant time</title>
 <style>
   :root { --ink:#14213D; --accent:#0B7A75; --paper:#F5F7F9; --line:#E2E8F0; --muted:#4A5568; }
@@ -307,6 +314,7 @@ render();
 sync();
 window.addEventListener("online", sync);
 document.addEventListener("visibilitychange", () => { if (!document.hidden) sync(); });
+if ("serviceWorker" in navigator) navigator.serviceWorker.register("sw.js").catch(() => {});
 </script>
 </body>
 </html>
