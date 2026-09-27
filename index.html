@@ -73,7 +73,7 @@
   </div>
 
   <div id="masterPanel" style="display:none;margin-top:12px;background:white;border:1px solid var(--line);border-radius:8px;padding:12px">
-    <p class="sub" style="margin:0 0 8px">Hours for all doctors by day. Entries on this device are included. For doctors who log on their own phone, load or paste the export they send you.</p>
+    <p class="sub" style="margin:0 0 8px">Hours for all doctors by day, from the shared log. You can also load or paste an export someone sends you.</p>
     <p class="status" id="masterNote" style="margin:0 0 8px"></p>
     <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:8px">
       <label class="export" style="display:inline-block">Load files<input type="file" id="masterFiles" accept=".csv,text/csv,text/plain" multiple style="display:none" onchange="loadMasterFiles(this)"></label>
@@ -107,7 +107,7 @@ const DOCTORS = ["Romancik", "Cho", "Reddy", "Donato", "Kaur"];
 const DURATIONS = [5, 10, 15, 30, 45, 60];
 const KEY = "bmt-pretx-log";
 const DOC_KEY = "bmt-pretx-doctor";
-const SHEET_URL = "";
+const SHEET_URL = "https://script.google.com/macros/s/AKfycbyr9eSiN6L6IkWBzpmH2oUyZTQ0UwcT6HZ4PjRJLCdlr2I_gfeR8bUNVs0FHTYyE1-G8w/exec";
 const DEL_KEY = "bmt-pretx-deleted";
 let shared = [];
 

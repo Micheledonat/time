@@ -1,6 +1,6 @@
 // Lets the app open without a connection. Always tries the network first,
 // so any update to the page reaches phones the next time they are online.
-const CACHE = "pretx-time-v1";
+const CACHE = "pretx-time-v2";
 const FILES = ["./", "./index.html", "./manifest.webmanifest", "./icon-180.png", "./icon-192.png", "./icon-512.png"];
 
 self.addEventListener("install", e => {
