@@ -67,6 +67,7 @@
 
   <div id="masterPanel" style="display:none;margin-top:12px;background:white;border:1px solid var(--line);border-radius:8px;padding:12px">
     <p class="sub" style="margin:0 0 8px">Hours for all doctors by day. Entries on this device are included. For doctors who log on their own phone, load or paste the export they send you.</p>
+    <p class="status" id="masterNote" style="margin:0 0 8px"></p>
     <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:8px">
       <label class="export" style="display:inline-block">Load files<input type="file" id="masterFiles" accept=".csv,text/csv,text/plain" multiple style="display:none" onchange="loadMasterFiles(this)"></label>
       <button class="export" style="background:var(--accent)" onclick="addMasterPaste()">Add pasted</button>
@@ -99,6 +100,9 @@ const DOCTORS = ["Romancik", "Cho", "Reddy", "Donato", "Kaur"];
 const DURATIONS = [5, 10, 15, 30, 45, 60];
 const KEY = "bmt-pretx-log";
 const DOC_KEY = "bmt-pretx-doctor";
+const SHEET_URL = "";
+const DEL_KEY = "bmt-pretx-deleted";
+let shared = [];
 
 let entries = load();
 let doctor = localStorage.getItem(DOC_KEY) || "";
@@ -115,7 +119,7 @@ function pick(d) { doctor = d; localStorage.setItem(DOC_KEY, d); render(); }
 function log(activity, minutes) {
   if (!doctor) { setStatus("Choose your name first."); return; }
   entries.unshift({ id: Date.now(), date: today(), time: now(), doctor, activity, minutes });
-  save(); render(); setStatus("Saved");
+  save(); render(); setStatus("Saved"); sync();
   const el = document.querySelector('[data-act="' + cssEsc(activity) + '"]');
   if (el) { el.classList.add("hit"); setTimeout(() => el.classList.remove("hit"), 600); }
 }
@@ -123,15 +127,47 @@ function logOff() {
   if (!doctor) { setStatus("Choose your name first."); return; }
   if (entries.some(e => e.doctor === doctor && e.date === today() && e.activity === "OFF")) { setStatus("Already marked off today."); return; }
   entries.unshift({ id: Date.now(), date: today(), time: now(), doctor, activity: "OFF", minutes: 0 });
-  save(); render(); setStatus("Marked off for today.");
+  save(); render(); setStatus("Marked off for today."); sync();
 }
 function logOther(minutes) {
   const inp = document.getElementById("otherText"); const t = (inp.value || "").trim();
   if (!t) { setStatus("Type what the work was, then tap the minutes."); return; }
   log(t, minutes); inp.value = "";
 }
-function remove(id) { entries = entries.filter(e => e.id !== id); save(); render(); }
+function remove(id) {
+  const gone = entries.find(e => e.id === id);
+  if (gone && gone.synced) { const d = loadDeleted(); d.push(sid(gone)); localStorage.setItem(DEL_KEY, JSON.stringify(d)); }
+  entries = entries.filter(e => e.id !== id); save(); render(); sync();
+}
 function cssEsc(s) { return s.replace(/"/g, '\\"'); }
+
+function sid(e) { return e.doctor + "-" + e.id; }
+function loadDeleted() { try { return JSON.parse(localStorage.getItem(DEL_KEY) || "[]"); } catch (e) { return []; } }
+let syncing = false;
+async function sync() {
+  if (!SHEET_URL || syncing) return;
+  const add = entries.filter(e => !e.synced);
+  const del = loadDeleted();
+  if (!add.length && !del.length) return;
+  syncing = true;
+  try {
+    const res = await fetch(SHEET_URL, { method: "POST", headers: { "Content-Type": "text/plain;charset=utf-8" },
+      body: JSON.stringify({ add: add.map(e => ({ id: sid(e), date: e.date, time: e.time, doctor: e.doctor, activity: e.activity, minutes: e.minutes })), remove: del }) });
+    const r = await res.json();
+    if (r.ok) {
+      const sent = new Set(add.map(e => e.id));
+      entries.forEach(e => { if (sent.has(e.id)) e.synced = true; });
+      save();
+      localStorage.setItem(DEL_KEY, JSON.stringify(loadDeleted().filter(x => del.indexOf(x) < 0)));
+    }
+  } catch (e) {}
+  syncing = false;
+}
+async function fetchShared() {
+  if (!SHEET_URL) return false;
+  try { const r = await (await fetch(SHEET_URL)).json(); if (r.ok) { shared = r.entries; return true; } } catch (e) {}
+  return false;
+}
 
 function csvText() {
   const q = v => '"' + String(v ?? "").replace(/"/g,'""') + '"';
@@ -210,11 +246,14 @@ function loadMasterFiles(inp) {
 }
 function addMasterPaste() { const b = document.getElementById("masterPaste"); const n = addToMaster(parseExport(b.value || "")); if (n || b.value) { b.value = ""; renderMaster(); setStatus(n + " entries added."); } }
 function clearMaster() { if (confirm("Remove loaded exports from the master view? Entries on this device stay.")) { saveMaster([]); renderMaster(); } }
-function openMaster() { renderMaster(); const p = document.getElementById("masterPanel"); p.style.display = "block"; p.scrollIntoView({ behavior: "smooth" }); }
+function openMaster() { renderMaster(); const p = document.getElementById("masterPanel"); p.style.display = "block"; p.scrollIntoView({ behavior: "smooth" });
+  if (SHEET_URL) { document.getElementById("masterNote").textContent = "Updating from the shared log..."; sync().then(fetchShared).then(ok => {
+    document.getElementById("masterNote").textContent = ok ? "Shared log for all doctors, updated " + now() + "." : "Could not reach the shared log. Showing this device only.";
+    renderMaster(); }); } }
 function closeMaster() { document.getElementById("masterPanel").style.display = "none"; }
 function renderMaster() {
   const seen = new Set(); const all = [];
-  entries.concat(loadMaster()).forEach(e => { const k = [e.date, e.time, e.doctor, e.activity, e.minutes].join("|"); if (!seen.has(k)) { seen.add(k); all.push(e); } });
+  entries.concat(shared, loadMaster()).forEach(e => { const k = [e.date, e.time, e.doctor, e.activity, e.minutes].join("|"); if (!seen.has(k)) { seen.add(k); all.push(e); } });
   const docs = [...new Set(DOCTORS.concat(all.map(e => e.doctor)))];
   const dates = [...new Set(all.map(e => e.date))].sort().reverse();
   const cell = {}; all.forEach(e => { const k = e.date + "|" + e.doctor; if (!cell[k]) cell[k] = { m: 0, off: false }; cell[k].m += e.minutes; if (e.activity === "OFF") cell[k].off = true; });
@@ -265,6 +304,9 @@ function render() {
   document.getElementById("count").textContent = entries.length + " entries, " + Math.round(all/60) + " h logged on this device";
 }
 render();
+sync();
+window.addEventListener("online", sync);
+document.addEventListener("visibilitychange", () => { if (!document.hidden) sync(); });
 </script>
 </body>
 </html>
