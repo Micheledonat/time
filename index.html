@@ -52,7 +52,7 @@
   <div id="list"></div>
 
   <p class="empty" id="coverage" style="margin:8px 0 0"></p>
-  <footer><span id="count"></span><button class="export" onclick="exportCsv()">Export</button></footer>
+  <footer><span id="count"></span><span><button class="name" onclick="openMaster()">Master view</button> <button class="export" onclick="exportCsv()">Export</button></span></footer>
 
   <div id="exportPanel" style="display:none;margin-top:12px;background:white;border:1px solid var(--line);border-radius:8px;padding:12px">
     <p class="sub" style="margin:0 0 8px">Your log, ready to send. Nothing has been deleted. Use Share to send it by email or message, Copy to paste it, or Save to keep the file on this device.</p>
@@ -63,6 +63,18 @@
       <button class="name" onclick="closeExport()">Close</button>
     </div>
     <textarea id="csvBox" readonly style="width:100%;height:140px;font-size:12px;font-family:monospace;border:1px solid var(--line);border-radius:6px;padding:8px"></textarea>
+  </div>
+
+  <div id="masterPanel" style="display:none;margin-top:12px;background:white;border:1px solid var(--line);border-radius:8px;padding:12px">
+    <p class="sub" style="margin:0 0 8px">Hours for all doctors by day. Entries on this device are included. For doctors who log on their own phone, load or paste the export they send you.</p>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:8px">
+      <label class="export" style="display:inline-block">Load files<input type="file" id="masterFiles" accept=".csv,text/csv,text/plain" multiple style="display:none" onchange="loadMasterFiles(this)"></label>
+      <button class="export" style="background:var(--accent)" onclick="addMasterPaste()">Add pasted</button>
+      <button class="name" onclick="clearMaster()">Clear loaded</button>
+      <button class="name" onclick="closeMaster()">Close</button>
+    </div>
+    <textarea id="masterPaste" placeholder="Paste an export here, then tap Add pasted" style="width:100%;height:70px;font-size:12px;font-family:monospace;border:1px solid var(--line);border-radius:6px;padding:8px;margin-bottom:8px"></textarea>
+    <div style="overflow-x:auto"><table id="masterTable" style="width:100%;border-collapse:collapse;font-size:13px;font-variant-numeric:tabular-nums"></table></div>
   </div>
 </div>
 
@@ -83,7 +95,7 @@ const ACTIVITIES = [
   "Weekly transplant meeting",
   "Tumor board",
 ];
-const DOCTORS = ["Romancik", "Cho", "Reddy", "Donato"];
+const DOCTORS = ["Romancik", "Cho", "Reddy", "Donato", "Kaur"];
 const DURATIONS = [5, 10, 15, 30, 45, 60];
 const KEY = "bmt-pretx-log";
 const DOC_KEY = "bmt-pretx-doctor";
@@ -96,6 +108,7 @@ function save() { localStorage.setItem(KEY, JSON.stringify(entries)); }
 function today() { const d = new Date(); return d.getFullYear() + "-" + String(d.getMonth()+1).padStart(2,"0") + "-" + String(d.getDate()).padStart(2,"0"); }
 function now() { const d = new Date(); return String(d.getHours()).padStart(2,"0") + ":" + String(d.getMinutes()).padStart(2,"0"); }
 function setStatus(t) { const s = document.getElementById("status"); s.textContent = t; if (t) setTimeout(() => { if (s.textContent === t) s.textContent = ""; }, 1500); }
+function niceDate(k) { const p = k.split("-"); return new Date(+p[0], +p[1]-1, +p[2]).toLocaleDateString("en-US", { weekday:"short", month:"short", day:"numeric", year:"numeric" }); }
 
 function pick(d) { doctor = d; localStorage.setItem(DOC_KEY, d); render(); }
 
@@ -121,9 +134,29 @@ function remove(id) { entries = entries.filter(e => e.id !== id); save(); render
 function cssEsc(s) { return s.replace(/"/g, '\\"'); }
 
 function csvText() {
+  const q = v => '"' + String(v ?? "").replace(/"/g,'""') + '"';
   const head = ["date","time","physician","activity","minutes"];
-  const rows = entries.slice().reverse().map(e => [e.date, e.time, e.doctor, e.activity, e.minutes].map(v => '"' + String(v ?? "").replace(/"/g,'""') + '"').join(","));
-  return [head.join(","), ...rows].join("\n");
+  const rows = entries.slice().reverse().map(e => [e.date, e.time, e.doctor, e.activity, e.minutes].map(q).join(","));
+  const names = [...new Set(entries.map(e => e.doctor))];
+  const dates = entries.map(e => e.date).sort();
+  const daily = {};
+  entries.forEach(e => { const k = e.date + "|" + e.doctor; if (!daily[k]) daily[k] = { date: e.date, doctor: e.doctor, minutes: 0, off: false }; daily[k].minutes += e.minutes; if (e.activity === "OFF") daily[k].off = true; });
+  const dayRows = Object.values(daily).sort((a, b) => a.date < b.date ? -1 : a.date > b.date ? 1 : a.doctor < b.doctor ? -1 : 1)
+    .map(d => [d.date, d.doctor, d.minutes, (d.minutes/60).toFixed(2), d.off && !d.minutes ? "Off" : ""].map(q).join(","));
+  const total = entries.reduce((s, e) => s + e.minutes, 0);
+  const top = [
+    q("Pre-transplant time"),
+    q("Physician") + "," + q(names.join(", ") || "none"),
+    q("Dates") + "," + q(dates.length ? dates[0] + " to " + dates[dates.length-1] : "none"),
+    "",
+    "Daily totals",
+    ["date","physician","minutes","hours","note"].join(","),
+    ...dayRows,
+    q("Total") + ",," + q(total) + "," + q((total/60).toFixed(2)),
+    "",
+    "Entries"
+  ];
+  return [...top, head.join(","), ...rows].join("\n");
 }
 function exportCsv() {
   const text = csvText();
@@ -148,6 +181,60 @@ async function copyCsv() {
 }
 function closeExport() { document.getElementById("exportPanel").style.display = "none"; }
 
+const MASTER_KEY = "bmt-pretx-master";
+function loadMaster() { try { return JSON.parse(localStorage.getItem(MASTER_KEY) || "[]"); } catch (e) { return []; } }
+function saveMaster(m) { localStorage.setItem(MASTER_KEY, JSON.stringify(m)); }
+function splitCsv(l) { const out = []; let cur = "", inq = false;
+  for (let i = 0; i < l.length; i++) { const c = l[i];
+    if (inq) { if (c === '"') { if (l[i+1] === '"') { cur += '"'; i++; } else inq = false; } else cur += c; }
+    else if (c === '"') inq = true; else if (c === ",") { out.push(cur); cur = ""; } else cur += c; }
+  out.push(cur); return out; }
+function parseExport(text) {
+  const lines = text.replace(/\r/g, "").split("\n");
+  const start = lines.findIndex(l => /^"?date"?,"?time"?,"?physician"?,"?activity"?,"?minutes"?\s*$/i.test(l.trim()));
+  if (start < 0) return [];
+  return lines.slice(start + 1).map(l => l.trim()).filter(Boolean).map(splitCsv)
+    .filter(c => c.length >= 5 && /^\d{4}-\d{2}-\d{2}$/.test(c[0]))
+    .map(c => ({ date: c[0], time: c[1], doctor: c[2], activity: c[3], minutes: Number(c[4]) || 0 }));
+}
+function addToMaster(rows) {
+  if (!rows.length) { setStatus("No entries found in that."); return 0; }
+  const m = loadMaster(); const seen = new Set(m.map(e => [e.date, e.time, e.doctor, e.activity, e.minutes].join("|")));
+  let n = 0; rows.forEach(e => { const k = [e.date, e.time, e.doctor, e.activity, e.minutes].join("|"); if (!seen.has(k)) { seen.add(k); m.push(e); n++; } });
+  saveMaster(m); return n;
+}
+function loadMasterFiles(inp) {
+  const files = [...inp.files]; let left = files.length, added = 0;
+  files.forEach(f => { const r = new FileReader(); r.onload = () => { added += addToMaster(parseExport(r.result)); if (--left === 0) { renderMaster(); setStatus(added + " entries added."); } }; r.readAsText(f); });
+  inp.value = "";
+}
+function addMasterPaste() { const b = document.getElementById("masterPaste"); const n = addToMaster(parseExport(b.value || "")); if (n || b.value) { b.value = ""; renderMaster(); setStatus(n + " entries added."); } }
+function clearMaster() { if (confirm("Remove loaded exports from the master view? Entries on this device stay.")) { saveMaster([]); renderMaster(); } }
+function openMaster() { renderMaster(); const p = document.getElementById("masterPanel"); p.style.display = "block"; p.scrollIntoView({ behavior: "smooth" }); }
+function closeMaster() { document.getElementById("masterPanel").style.display = "none"; }
+function renderMaster() {
+  const seen = new Set(); const all = [];
+  entries.concat(loadMaster()).forEach(e => { const k = [e.date, e.time, e.doctor, e.activity, e.minutes].join("|"); if (!seen.has(k)) { seen.add(k); all.push(e); } });
+  const docs = [...new Set(DOCTORS.concat(all.map(e => e.doctor)))];
+  const dates = [...new Set(all.map(e => e.date))].sort().reverse();
+  const cell = {}; all.forEach(e => { const k = e.date + "|" + e.doctor; if (!cell[k]) cell[k] = { m: 0, off: false }; cell[k].m += e.minutes; if (e.activity === "OFF") cell[k].off = true; });
+  const td = 'style="padding:6px 4px;border-bottom:1px solid var(--line);text-align:right;white-space:nowrap"';
+  const tdl = 'style="padding:6px 4px;border-bottom:1px solid var(--line);text-align:left;white-space:nowrap"';
+  const h = v => (v/60).toFixed(2);
+  let html = '<tr><th ' + tdl + '>Date</th>' + docs.map(d => '<th ' + td + '>' + d + '</th>').join("") + '<th ' + td + '>Total</th></tr>';
+  const colTot = {}; let grand = 0;
+  dates.forEach(dt => {
+    let rt = 0;
+    html += '<tr><td ' + tdl + '>' + niceDate(dt) + '</td>' + docs.map(d => { const c = cell[dt + "|" + d];
+      if (!c) return '<td ' + td + '></td>';
+      rt += c.m; colTot[d] = (colTot[d] || 0) + c.m;
+      return '<td ' + td + '>' + (c.m ? h(c.m) : (c.off ? "Off" : "")) + '</td>'; }).join("") + '<td ' + td + '>' + (rt ? h(rt) : "") + '</td></tr>';
+    grand += rt;
+  });
+  html += '<tr><td ' + tdl + '><b>Total hours</b></td>' + docs.map(d => '<td ' + td + '><b>' + h(colTot[d] || 0) + '</b></td>').join("") + '<td ' + td + '><b>' + h(grand) + '</b></td></tr>';
+  document.getElementById("masterTable").innerHTML = dates.length ? html : '<tr><td class="empty">No entries yet.</td></tr>';
+}
+
 function render() {
   document.getElementById("names").innerHTML = DOCTORS.map(d =>
     '<button class="name' + (d === doctor ? " on" : "") + '" onclick="pick(\'' + d + '\')">' + d + '</button>').join("");
@@ -166,7 +253,7 @@ function render() {
 
   const tot = todays.reduce((s, e) => s + e.minutes, 0);
   document.getElementById("todayTotal").textContent = Math.floor(tot/60) + "h " + (tot%60) + "m";
-  document.getElementById("who").textContent = "today, " + (doctor || "no name selected");
+  document.getElementById("who").textContent = "today, " + niceDate(today()) + ", " + (doctor || "no name selected");
   document.getElementById("list").innerHTML = todays.length ? todays.map(e =>
     '<div class="entry"><div>' + e.time + '&nbsp; ' + (e.activity === "OFF" ? "Off today" : e.activity + ' <b>' + e.minutes + ' min</b>') + '</div><button class="small" onclick="remove(' + e.id + ')"><small>delete</small></button></div>').join("")
     : '<p class="empty">No entries yet today.</p>';
